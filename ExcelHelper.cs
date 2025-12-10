@@ -51,6 +51,51 @@ namespace ExcelPdf
             var cell = row.GetCell(cellRef.Col) ?? row.CreateCell(cellRef.Col);
 
             cell.SetCellValue(value);
+            cell.SetCellValue(value);
+        }
+
+        /// <summary>
+        /// Sets the value of a specific cell using row and column indices.
+        /// </summary>
+        /// <param name="sheetName">The name of the sheet.</param>
+        /// <param name="row">The 0-based row index.</param>
+        /// <param name="col">The 0-based column index.</param>
+        /// <param name="value">The value to set.</param>
+        public void SetCellValue(string sheetName, int row, int col, string value)
+        {
+            var sheet = GetSheet(sheetName);
+            var sheetRow = sheet.GetRow(row) ?? sheet.CreateRow(row);
+            var cell = sheetRow.GetCell(col) ?? sheetRow.CreateCell(col);
+
+            cell.SetCellValue(value);
+        }
+
+        /// <summary>
+        /// Gets the string value of a specific cell.
+        /// </summary>
+        /// <param name="sheetName">The name of the sheet.</param>
+        /// <param name="cellAddress">The cell address (e.g., "A1").</param>
+        /// <returns>The string value of the cell, or empty string if cell is null/empty.</returns>
+        public string GetCellValue(string sheetName, string cellAddress)
+        {
+            var sheet = GetSheet(sheetName);
+            var cellRef = new CellReference(cellAddress);
+            var row = sheet.GetRow(cellRef.Row);
+            var cell = row?.GetCell(cellRef.Col);
+
+            if (cell == null) return string.Empty;
+
+            return cell.CellType switch
+            {
+                CellType.String => cell.StringCellValue,
+                CellType.Numeric => cell.NumericCellValue.ToString(),
+                CellType.Boolean => cell.BooleanCellValue.ToString(),
+                CellType.Formula => cell.CachedFormulaResultType == CellType.String ? cell.StringCellValue : 
+                                    (cell.CachedFormulaResultType == CellType.Numeric ? cell.NumericCellValue.ToString() : 
+                                    cell.CellFormula), // Basic handling
+                CellType.Blank => string.Empty,
+                _ => cell.ToString() ?? string.Empty
+            };
         }
 
         /// <summary>
@@ -334,6 +379,40 @@ namespace ExcelPdf
             else if (drawing is HSSFPatriarch hssfPatriarch)
             {
                  // HSSF removal is also hard.
+            }
+        }
+
+        /// <summary>
+        /// Removes a row from a sheet.
+        /// </summary>
+        /// <param name="sheetName">The name of the sheet.</param>
+        /// <param name="rowIndex">The 0-based index of the row to remove.</param>
+        public void RemoveRow(string sheetName, int rowIndex)
+        {
+            var sheet = GetSheet(sheetName);
+            var row = sheet.GetRow(rowIndex);
+            if (row != null)
+            {
+                sheet.RemoveRow(row);
+                // Shift rows up to close the gap
+                int lastRowIndex = sheet.LastRowNum;
+                if (rowIndex >= 0 && rowIndex < lastRowIndex)
+                {
+                    sheet.ShiftRows(rowIndex + 1, lastRowIndex, -1);
+                }
+            }
+        }
+
+        /// <summary>
+        /// Removes a sheet from the workbook.
+        /// </summary>
+        /// <param name="sheetName">The name of the sheet to remove.</param>
+        public void RemoveSheet(string sheetName)
+        {
+            int sheetIndex = _workbook.GetSheetIndex(sheetName);
+            if (sheetIndex != -1)
+            {
+                _workbook.RemoveSheetAt(sheetIndex);
             }
         }
     }
