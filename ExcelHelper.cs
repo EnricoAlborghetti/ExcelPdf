@@ -72,6 +72,60 @@ namespace ExcelPdf
         }
 
         /// <summary>
+        /// Sets the value of a specific cell with font styling.
+        /// </summary>
+        /// <param name="sheetName">The name of the sheet.</param>
+        /// <param name="cellAddress">The cell address (e.g., "A1").</param>
+        /// <param name="value">The value to set.</param>
+        /// <param name="fontName">The font name.</param>
+        /// <param name="fontSize">The font size.</param>
+        /// <param name="isBold">Whether the text is bold.</param>
+        /// <param name="colorHex">The font color in hex (e.g. "FF0000").</param>
+        public void SetCellValue(string sheetName, string cellAddress, string? value, string? fontName = null, double? fontSize = null, bool? isBold = null, string? colorHex = null)
+        {
+            var sheet = GetSheet(sheetName);
+            var cellRef = new CellReference(cellAddress);
+            var row = sheet.GetRow(cellRef.Row) ?? sheet.CreateRow(cellRef.Row);
+            var cell = row.GetCell(cellRef.Col) ?? row.CreateCell(cellRef.Col);
+
+            cell.SetCellValue(value);
+
+            var style = _workbook.CreateCellStyle();
+            style.CloneStyleFrom(cell.CellStyle);
+
+            var font = _workbook.CreateFont();
+            var setFont = false;
+            if (fontName is not null) { font.FontName = fontName; setFont = true; }
+            if (fontSize.HasValue) { font.FontHeightInPoints = fontSize.Value; setFont = true; }
+            if (isBold.HasValue) { font.IsBold = isBold.Value; setFont = true; }
+
+            if (!string.IsNullOrEmpty(colorHex))
+            {
+                setFont = true;
+                if (font is XSSFFont xssfFont)
+                {
+                    try
+                    {
+                        byte[] rgb = Enumerable.Range(0, colorHex.Length)
+                             .Where(x => x % 2 == 0)
+                             .Select(x => Convert.ToByte(colorHex.Substring(x, 2), 16))
+                             .ToArray();
+                        if (rgb.Length == 3)
+                        {
+                            var color = new XSSFColor(rgb);
+                            xssfFont.SetColor(color);
+                        }
+                    }
+                    catch { /* Ignore invalid hex */ }
+                }
+            }
+
+            if (setFont)
+                style.SetFont(font);
+            cell.CellStyle = style;
+        }
+
+        /// <summary>
         /// Gets the string value of a specific cell.
         /// </summary>
         /// <param name="sheetName">The name of the sheet.</param>
@@ -362,22 +416,6 @@ namespace ExcelPdf
             var hyperlink = _workbook.GetCreationHelper().CreateHyperlink(HyperlinkType.Url);
             hyperlink.Address = url;
             cell.Hyperlink = hyperlink;
-
-            // Optional: Style the cell to look like a link (blue, underlined)
-            // But usually user might want to control style separately. 
-            // Let's add basic link styling if no style exists, or modify existing.
-            // Modifying existing style is risky if shared. 
-            // Let's create a new style inheriting from existing or default.
-
-            var style = _workbook.CreateCellStyle();
-            style.CloneStyleFrom(cell.CellStyle);
-
-            var font = _workbook.CreateFont();
-            font.Underline = FontUnderlineType.Single;
-            font.Color = IndexedColors.Blue.Index;
-            style.SetFont(font);
-
-            cell.CellStyle = style;
         }
 
         /// <summary>
