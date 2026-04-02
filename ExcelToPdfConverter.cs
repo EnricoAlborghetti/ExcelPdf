@@ -3,7 +3,6 @@ using NPOI.XSSF.UserModel;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
 using QuestPDF.Infrastructure;
-using NPOI.SS.Formula.Functions;
 
 namespace ExcelPdf
 {
