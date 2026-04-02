@@ -244,6 +244,20 @@ namespace ExcelPdf
             // A4 width (595.28) - Margins (2cm = 56.7pts)
             float printablePageWidth = 595.28f - 56.7f;
 
+            // Build merged region cache for this sheet
+            var mergedRegions = new Dictionary<(int Row, int Col), NPOI.SS.Util.CellRangeAddress>();
+            for (int i = 0; i < sheet.NumMergedRegions; i++)
+            {
+                var region = sheet.GetMergedRegion(i);
+                for (int r = region.FirstRow; r <= region.LastRow; r++)
+                {
+                    for (int c = region.FirstColumn; c <= region.LastColumn; c++)
+                    {
+                        mergedRegions[(r, c)] = region;
+                    }
+                }
+            }
+
             container.Table(table =>
             {
                 table.ColumnsDefinition(columns =>
@@ -268,7 +282,7 @@ namespace ExcelPdf
 
                         float mergedRowHeight = rowHeight;
 
-                        if (IsMergedCell(sheet, r, c, out var heightMergedRange) && heightMergedRange != null)
+                        if (IsMergedCell(sheet, r, c, out var heightMergedRange, mergedRegions) && heightMergedRange != null)
                         {
                             mergedRowHeight = 0;
                             for (int mr = heightMergedRange.FirstRow; mr <= heightMergedRange.LastRow; mr++)
@@ -307,7 +321,7 @@ namespace ExcelPdf
                             Console.WriteLine("------------------------");
                         }
 
-                        if (IsMergedCell(sheet, r, c, out var mergedRange) && mergedRange != null && (mergedRange.FirstRow != r || mergedRange.FirstColumn != c))
+                        if (IsMergedCell(sheet, r, c, out var mergedRange, mergedRegions) && mergedRange != null && (mergedRange.FirstRow != r || mergedRange.FirstColumn != c))
                         {
                             continue;
                         }
@@ -579,8 +593,18 @@ namespace ExcelPdf
             return images;
         }
 
-        private bool IsMergedCell(ISheet sheet, int row, int col, out NPOI.SS.Util.CellRangeAddress? range)
+        private bool IsMergedCell(ISheet sheet, int row, int col, out NPOI.SS.Util.CellRangeAddress? range, Dictionary<(int Row, int Col), NPOI.SS.Util.CellRangeAddress>? cache = null)
         {
+            if (cache != null)
+            {
+                if (cache.TryGetValue((row, col), out range))
+                {
+                    return true;
+                }
+                range = null;
+                return false;
+            }
+
             range = null;
             for (int i = 0; i < sheet.NumMergedRegions; i++)
             {
