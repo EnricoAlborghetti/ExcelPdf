@@ -5,6 +5,16 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>ExcelPdf</RootNamespace>
+
+    <!-- NuGet properties -->
+    <Version>1.0.0</Version>
+    <Title>ExcelPdf</Title>
+    <Authors>EnricoAlborghetti</Authors>
+    <Description>A robust C# library for converting Excel files (XLSX) to PDF documents using NPOI and QuestPDF.</Description>
+    <PackageProjectUrl>https://github.com/EnricoAlborghetti/ExcelPdf</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/EnricoAlborghetti/ExcelPdf.git</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
   </PropertyGroup>
 
   <ItemGroup>
