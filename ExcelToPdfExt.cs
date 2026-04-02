@@ -284,7 +284,7 @@ namespace ExcelPdf
             };
         }
 
-        private static string ApplyTint(byte[] rgb, double tint)
+        public static string ApplyTint(byte[] rgb, double tint)
         {
             double r = rgb[0];
             double g = rgb[1];
