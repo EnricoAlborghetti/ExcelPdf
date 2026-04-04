@@ -748,7 +748,7 @@ namespace ExcelPdf
         /// </param>
         public void Save(string? outputPath = null)
         {
-            // If outputPath is provided, save to new file. 
+            // If outputPath is provided, save to new file.
             // If not, we might want to overwrite the original, but we have it open.
             // NPOI usually requires writing to a new stream.
 
@@ -758,8 +758,16 @@ namespace ExcelPdf
             // Or write to a temp file and replace.
 
             string absoluteFilePath = Path.GetFullPath(_filePath);
+            string absoluteSourceDir = Path.GetDirectoryName(absoluteFilePath) ?? string.Empty;
 
-            if (outputPath == null || Path.GetFullPath(outputPath).Equals(absoluteFilePath, StringComparison.OrdinalIgnoreCase))
+            // Resolve relative outputPath against the source file's directory
+            string resolvedOutputPath = outputPath;
+            if (outputPath != null && !Path.IsPathRooted(outputPath))
+            {
+                resolvedOutputPath = Path.Combine(absoluteSourceDir, outputPath);
+            }
+
+            if (outputPath == null || Path.GetFullPath(resolvedOutputPath).Equals(absoluteFilePath, StringComparison.OrdinalIgnoreCase))
             {
                 // Overwriting current file
                 // We can't write to the same stream we are reading from easily with NPOI in this mode usually.
@@ -772,7 +780,7 @@ namespace ExcelPdf
 
                     File.WriteAllBytes(absoluteFilePath, memoryStream.ToArray());
 
-                    // Re-open if we want to continue using it? 
+                    // Re-open if we want to continue using it?
                     // For this helper, maybe Save ends the session or we re-open.
                     // Let's re-open to allow further edits if needed, or just leave it closed if Dispose is called.
                     _fileStream = new FileStream(absoluteFilePath, FileMode.Open, FileAccess.ReadWrite);
@@ -782,8 +790,7 @@ namespace ExcelPdf
             {
                 // Security Fix: Validate outputPath against path traversal.
                 // We ensure the output path is within the directory of the original file.
-                string absoluteOutputPath = Path.GetFullPath(outputPath);
-                string absoluteSourceDir = Path.GetDirectoryName(absoluteFilePath) ?? string.Empty;
+                string absoluteOutputPath = Path.GetFullPath(resolvedOutputPath);
 
                 // Ensure the directory path ends with a separator to avoid partial path match (CWE-22)
                 string safeSourceDir = absoluteSourceDir.EndsWith(Path.DirectorySeparatorChar.ToString())
