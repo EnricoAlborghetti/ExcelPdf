@@ -757,7 +757,9 @@ namespace ExcelPdf
             // If saving to the same file, we need to close the read stream first?
             // Or write to a temp file and replace.
 
-            if (outputPath == null || outputPath == _filePath)
+            string absoluteFilePath = Path.GetFullPath(_filePath);
+
+            if (outputPath == null || Path.GetFullPath(outputPath).Equals(absoluteFilePath, StringComparison.OrdinalIgnoreCase))
             {
                 // Overwriting current file
                 // We can't write to the same stream we are reading from easily with NPOI in this mode usually.
@@ -768,17 +770,32 @@ namespace ExcelPdf
                     _workbook.Write(memoryStream);
                     _fileStream.Close(); // Close the input stream
 
-                    File.WriteAllBytes(_filePath, memoryStream.ToArray());
+                    File.WriteAllBytes(absoluteFilePath, memoryStream.ToArray());
 
                     // Re-open if we want to continue using it? 
                     // For this helper, maybe Save ends the session or we re-open.
                     // Let's re-open to allow further edits if needed, or just leave it closed if Dispose is called.
-                    _fileStream = new FileStream(_filePath, FileMode.Open, FileAccess.ReadWrite);
+                    _fileStream = new FileStream(absoluteFilePath, FileMode.Open, FileAccess.ReadWrite);
                 }
             }
             else
             {
-                using (var fs = new FileStream(outputPath, FileMode.Create, FileAccess.Write))
+                // Security Fix: Validate outputPath against path traversal.
+                // We ensure the output path is within the directory of the original file.
+                string absoluteOutputPath = Path.GetFullPath(outputPath);
+                string absoluteSourceDir = Path.GetDirectoryName(absoluteFilePath) ?? string.Empty;
+
+                // Ensure the directory path ends with a separator to avoid partial path match (CWE-22)
+                string safeSourceDir = absoluteSourceDir.EndsWith(Path.DirectorySeparatorChar.ToString())
+                    ? absoluteSourceDir
+                    : absoluteSourceDir + Path.DirectorySeparatorChar;
+
+                if (!absoluteOutputPath.StartsWith(safeSourceDir, StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new UnauthorizedAccessException("Access to the specified path is denied. Saving outside the source directory is not permitted for security reasons.");
+                }
+
+                using (var fs = new FileStream(absoluteOutputPath, FileMode.Create, FileAccess.Write))
                 {
                     _workbook.Write(fs);
                 }
