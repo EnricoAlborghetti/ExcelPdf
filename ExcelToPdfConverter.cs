@@ -83,6 +83,9 @@ namespace ExcelPdf
         /// <exception cref="FileNotFoundException">Thrown if the input file does not exist.</exception>
         public Document Convert()
         {
+            // Clear cache to release sheet references from previous workbooks
+            _mergedRegionCache.Clear();
+
             if (!File.Exists(_inputPath))
             {
                 throw new FileNotFoundException($"Input file not found: {_inputPath}");
