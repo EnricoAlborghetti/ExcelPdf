@@ -16,6 +16,7 @@ namespace ExcelPdf
         private IEnumerable<string>? _printRanges = null;
         private Dictionary<string, string>? _cellUpdates = null;
         private Dictionary<string, string>? _imageUpdates = null;
+        private Dictionary<ISheet, Dictionary<(int, int), NPOI.SS.Util.CellRangeAddress>> _mergedRegionCache = new();
 
         public ExcelToPdfConverter()
         {
@@ -580,17 +581,24 @@ namespace ExcelPdf
 
         private bool IsMergedCell(ISheet sheet, int row, int col, out NPOI.SS.Util.CellRangeAddress? range)
         {
-            range = null;
-            for (int i = 0; i < sheet.NumMergedRegions; i++)
+            if (!_mergedRegionCache.TryGetValue(sheet, out var sheetCache))
             {
-                var region = sheet.GetMergedRegion(i);
-                if (region.IsInRange(row, col))
+                sheetCache = new Dictionary<(int, int), NPOI.SS.Util.CellRangeAddress>();
+                for (int i = 0; i < sheet.NumMergedRegions; i++)
                 {
-                    range = region;
-                    return true;
+                    var region = sheet.GetMergedRegion(i);
+                    for (int r = region.FirstRow; r <= region.LastRow; r++)
+                    {
+                        for (int c = region.FirstColumn; c <= region.LastColumn; c++)
+                        {
+                            sheetCache[(r, c)] = region;
+                        }
+                    }
                 }
+                _mergedRegionCache[sheet] = sheetCache;
             }
-            return false;
+
+            return sheetCache.TryGetValue((row, col), out range);
         }
 
         private string GetCellValue(ICell? cell, IFormulaEvaluator evaluator)
