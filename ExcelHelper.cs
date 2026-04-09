@@ -104,19 +104,12 @@ namespace ExcelPdf
                 setFont = true;
                 if (font is XSSFFont xssfFont)
                 {
-                    try
+                    byte[]? rgb = TryParseHexColor(colorHex);
+                    if (rgb != null && rgb.Length == 3)
                     {
-                        byte[] rgb = Enumerable.Range(0, colorHex.Length)
-                             .Where(x => x % 2 == 0)
-                             .Select(x => Convert.ToByte(colorHex.Substring(x, 2), 16))
-                             .ToArray();
-                        if (rgb.Length == 3)
-                        {
-                            var color = new XSSFColor(rgb);
-                            xssfFont.SetColor(color);
-                        }
+                        var color = new XSSFColor(rgb);
+                        xssfFont.SetColor(color);
                     }
-                    catch { /* Ignore invalid hex */ }
                 }
             }
 
@@ -368,19 +361,12 @@ namespace ExcelPdf
                 // Let's assume XSSF (xlsx) primarily as per project usage.
                 if (font is XSSFFont xssfFont)
                 {
-                    try
+                    byte[]? rgb = TryParseHexColor(colorHex);
+                    if (rgb != null && rgb.Length == 3)
                     {
-                        byte[] rgb = Enumerable.Range(0, colorHex.Length)
-                             .Where(x => x % 2 == 0)
-                             .Select(x => Convert.ToByte(colorHex.Substring(x, 2), 16))
-                             .ToArray();
-                        if (rgb.Length == 3)
-                        {
-                            var color = new XSSFColor(rgb);
-                            xssfFont.SetColor(color);
-                        }
+                        var color = new XSSFColor(rgb);
+                        xssfFont.SetColor(color);
                     }
-                    catch { /* Ignore invalid hex */ }
                 }
             }
 
@@ -842,6 +828,22 @@ namespace ExcelPdf
                 throw new ArgumentException($"Sheet '{sheetName}' not found.");
             }
             return sheet;
+        }
+
+        private byte[]? TryParseHexColor(string? colorHex)
+        {
+            if (string.IsNullOrEmpty(colorHex)) return null;
+            try
+            {
+                return Enumerable.Range(0, colorHex.Length)
+                     .Where(x => x % 2 == 0)
+                     .Select(x => Convert.ToByte(colorHex.Substring(x, 2), 16))
+                     .ToArray();
+            }
+            catch
+            {
+                return null;
+            }
         }
 
         private void RemoveImageAt(ISheet sheet, int row, int col)
