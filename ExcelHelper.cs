@@ -19,6 +19,7 @@ namespace ExcelPdf
         private IWorkbook _workbook;
         private string _filePath;
         private FileStream _fileStream;
+        private readonly Dictionary<ISheet, Dictionary<(int Row, int Col), CellRangeAddress>> _mergedRegionCache = new();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ExcelHelper"/> class.
@@ -611,6 +612,8 @@ namespace ExcelPdf
                 newSheet.Footer.Right = sourceSheet.Footer.Right;
             }
             catch { }
+
+            ClearMergedRegionCache(newSheet);
         }
 
         /// <summary>
@@ -674,6 +677,8 @@ namespace ExcelPdf
                     }
                 }
             }
+
+            ClearMergedRegionCache(destSheet);
         }
 
         private void RemoveMergedRegionsInRow(ISheet sheet, int rowIndex)
@@ -686,6 +691,7 @@ namespace ExcelPdf
                     sheet.RemoveMergedRegion(i);
                 }
             }
+            ClearMergedRegionCache(sheet);
         }
 
         /// <summary>
@@ -831,6 +837,7 @@ namespace ExcelPdf
             _workbook?.Close();
             _fileStream?.Close();
             _fileStream?.Dispose();
+            _mergedRegionCache.Clear();
         }
 
         private ISheet GetSheet(string sheetName)
@@ -921,15 +928,41 @@ namespace ExcelPdf
             return PictureType.PNG;
         }
 
+        private void ClearMergedRegionCache(ISheet sheet)
+        {
+            if (sheet != null)
+            {
+                _mergedRegionCache.Remove(sheet);
+            }
+        }
+
+        private Dictionary<(int Row, int Col), CellRangeAddress> GetOrPopulateCache(ISheet sheet)
+        {
+            if (!_mergedRegionCache.TryGetValue(sheet, out var cache))
+            {
+                cache = new Dictionary<(int Row, int Col), CellRangeAddress>();
+                for (int i = 0; i < sheet.NumMergedRegions; i++)
+                {
+                    var region = sheet.GetMergedRegion(i);
+                    for (int r = region.FirstRow; r <= region.LastRow; r++)
+                    {
+                        for (int c = region.FirstColumn; c <= region.LastColumn; c++)
+                        {
+                            cache[(r, c)] = region;
+                        }
+                    }
+                }
+                _mergedRegionCache[sheet] = cache;
+            }
+            return cache;
+        }
+
         private CellRangeAddress? GetMergedRegion(ISheet sheet, int row, int col)
         {
-            for (int i = 0; i < sheet.NumMergedRegions; i++)
+            var cache = GetOrPopulateCache(sheet);
+            if (cache.TryGetValue((row, col), out var region))
             {
-                var region = sheet.GetMergedRegion(i);
-                if (region.IsInRange(row, col))
-                {
-                    return region;
-                }
+                return region;
             }
             return null;
         }
@@ -953,6 +986,7 @@ namespace ExcelPdf
                     sheet.ShiftRows(rowIndex + 1, lastRowIndex, -1);
                 }
             }
+            ClearMergedRegionCache(sheet);
         }
 
         /// <summary>
