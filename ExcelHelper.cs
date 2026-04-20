@@ -274,7 +274,14 @@ namespace ExcelPdf
 
             if (adaptiveCenter)
             {
-                ApplyAdaptiveCenterAnchor(sheet, fromRef, toRef, imageBytes, anchor);
+                if (!ApplyAdaptiveCenterAnchor(sheet, fromRef, toRef, imageBytes, anchor))
+                {
+                    // Fallback to non-adaptive if centering fails
+                    anchor.Col1 = fromRef.Col;
+                    anchor.Row1 = fromRef.Row;
+                    anchor.Col2 = toRef.Col + 1;
+                    anchor.Row2 = toRef.Row + 1;
+                }
             }
             else
             {
@@ -474,7 +481,7 @@ namespace ExcelPdf
         private void ManualCopySheet(string sourceSheetName, string newSheetName)
         {
             var sourceSheet = GetSheet(sourceSheetName);
-            // chkec if sheet exists
+            // check if sheet exists
             if (_workbook.GetSheetIndex(newSheetName) != -1)
             {
                 newSheetName = newSheetName + "_" + DateTime.Now.ToString("yyyyMMddHHmmss");
@@ -1025,7 +1032,7 @@ namespace ExcelPdf
             }
         }
 
-        private void ApplyAdaptiveCenterAnchor(ISheet sheet, CellReference fromRef, CellReference toRef, byte[] imageBytes, IClientAnchor anchor)
+        private bool ApplyAdaptiveCenterAnchor(ISheet sheet, CellReference fromRef, CellReference toRef, byte[] imageBytes, IClientAnchor anchor)
         {
             double targetWidthPoints = 0;
             for (int col = fromRef.Col; col <= toRef.Col; col++)
@@ -1043,7 +1050,7 @@ namespace ExcelPdf
             }
 
             using var codec = SKCodec.Create(new MemoryStream(imageBytes));
-            if (codec == null) return;
+            if (codec == null) return false;
 
             double imgWidthPx = codec.Info.Width;
             double imgHeightPx = codec.Info.Height;
@@ -1051,6 +1058,8 @@ namespace ExcelPdf
             // Convert pixels to points (assuming 96 DPI, so 1 px = 0.75 points)
             double imgWidthPoints = imgWidthPx * 0.75;
             double imgHeightPoints = imgHeightPx * 0.75;
+
+            if (imgWidthPoints <= 0 || imgHeightPoints <= 0) return false;
 
             double scale = Math.Min(targetWidthPoints / imgWidthPoints, targetHeightPoints / imgHeightPoints);
             double finalWidthPoints = imgWidthPoints * scale;
@@ -1060,6 +1069,7 @@ namespace ExcelPdf
             double marginTopPoints = (targetHeightPoints - finalHeightPoints) / 2;
 
             SetAnchorOffsets(sheet, anchor, fromRef.Col, fromRef.Row, toRef.Col, toRef.Row, marginLeftPoints, marginTopPoints, finalWidthPoints, finalHeightPoints);
+            return true;
         }
 
         private void SetAnchorOffsets(ISheet sheet, IClientAnchor anchor, int startCol, int startRow, int lastCol, int lastRow, double marginLeft, double marginTop, double width, double height)
@@ -1077,8 +1087,10 @@ namespace ExcelPdf
 
             int col2 = col1;
             double dx2Points = dx1Points + width;
+            int maxCol = _workbook.SpreadsheetVersion.LastColumnIndex;
             while (true)
             {
+                if (col2 > maxCol) throw new ArgumentException("The requested image width exceeds the maximum allowed column index.");
                 double colWidthPoints = sheet.GetColumnWidth(col2) / 256.0 * 7.2;
                 if (dx2Points < colWidthPoints) break;
                 dx2Points -= colWidthPoints;
@@ -1098,8 +1110,10 @@ namespace ExcelPdf
 
             int row2 = row1;
             double dy2Points = dy1Points + height;
+            int maxRow = _workbook.SpreadsheetVersion.LastRowIndex;
             while (true)
             {
+                if (row2 > maxRow) throw new ArgumentException("The requested image height exceeds the maximum allowed row index.");
                 double rowHeightPoints = sheet.GetRow(row2)?.HeightInPoints ?? sheet.DefaultRowHeightInPoints;
                 if (dy2Points < rowHeightPoints) break;
                 dy2Points -= rowHeightPoints;
