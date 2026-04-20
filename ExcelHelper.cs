@@ -3,6 +3,8 @@ using NPOI.SS.UserModel;
 using NPOI.XSSF.UserModel;
 using NPOI.HSSF.UserModel;
 using NPOI.SS.Util;
+using SkiaSharp;
+using NPOI.Util;
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -251,7 +253,8 @@ namespace ExcelPdf
         /// <param name="fromAddress">The top-left cell address (e.g., "A1").</param>
         /// <param name="toAddress">The bottom-right cell address (e.g., "E38").</param>
         /// <param name="imageBytes">The image bytes.</param>
-        public void SetCellImage(string sheetName, string fromAddress, string toAddress, byte[]? imageBytes)
+        /// <param name="adaptiveCenter">If true, fits the image in the range maintaining aspect ratio and centering it.</param>
+        public void SetCellImage(string sheetName, string fromAddress, string toAddress, byte[]? imageBytes, bool adaptiveCenter = false)
         {
             if (imageBytes == null || imageBytes.Length == 0) return;
 
@@ -269,10 +272,17 @@ namespace ExcelPdf
             var helper = _workbook.GetCreationHelper();
             var anchor = helper.CreateClientAnchor();
 
-            anchor.Col1 = fromRef.Col;
-            anchor.Row1 = fromRef.Row;
-            anchor.Col2 = toRef.Col + 1;
-            anchor.Row2 = toRef.Row + 1;
+            if (adaptiveCenter)
+            {
+                ApplyAdaptiveCenterAnchor(sheet, fromRef, toRef, imageBytes, anchor);
+            }
+            else
+            {
+                anchor.Col1 = fromRef.Col;
+                anchor.Row1 = fromRef.Row;
+                anchor.Col2 = toRef.Col + 1;
+                anchor.Row2 = toRef.Row + 1;
+            }
 
             // For XSSF (xlsx), we need to set AnchorType to MoveAndResize to behave like a cell content
             if (anchor is XSSFClientAnchor xssfAnchor)
@@ -286,10 +296,10 @@ namespace ExcelPdf
         /// <summary>
         /// Inserts or replaces an image in a specific cell range.
         /// </summary>
-        public void SetCellImage(string sheetName, string fromAddress, string toAddress, string imagePath)
+        public void SetCellImage(string sheetName, string fromAddress, string toAddress, string imagePath, bool adaptiveCenter = false)
         {
             if (!File.Exists(imagePath)) throw new FileNotFoundException($"Image file not found: {imagePath}");
-            SetCellImage(sheetName, fromAddress, toAddress, File.ReadAllBytes(imagePath));
+            SetCellImage(sheetName, fromAddress, toAddress, File.ReadAllBytes(imagePath), adaptiveCenter);
         }
 
         private int AddImageToWorkbook(byte[] imageBytes)
@@ -464,6 +474,11 @@ namespace ExcelPdf
         private void ManualCopySheet(string sourceSheetName, string newSheetName)
         {
             var sourceSheet = GetSheet(sourceSheetName);
+            // chkec if sheet exists
+            if (_workbook.GetSheetIndex(newSheetName) != -1)
+            {
+                newSheetName = newSheetName + "_" + DateTime.Now.ToString("yyyyMMddHHmmss");
+            }
             var newSheet = _workbook.CreateSheet(newSheetName);
 
             // 1. Copy Rows and Cells (Content) - Prioritize this to ensure data is present even if styles fail
@@ -1007,6 +1022,115 @@ namespace ExcelPdf
             {
                 _workbook.RemoveSheetAt(sheetIndex);
                 ClearCache(sheetName);
+            }
+        }
+
+        private void ApplyAdaptiveCenterAnchor(ISheet sheet, CellReference fromRef, CellReference toRef, byte[] imageBytes, IClientAnchor anchor)
+        {
+            double targetWidthPoints = 0;
+            for (int col = fromRef.Col; col <= toRef.Col; col++)
+            {
+                // NPOI returns column width in 1/256th of a character width.
+                // An approximation for points: width / 256.0 * 7.2
+                targetWidthPoints += sheet.GetColumnWidth(col) / 256.0 * 7.2;
+            }
+
+            double targetHeightPoints = 0;
+            for (int row = fromRef.Row; row <= toRef.Row; row++)
+            {
+                var r = sheet.GetRow(row);
+                targetHeightPoints += r?.HeightInPoints ?? sheet.DefaultRowHeightInPoints;
+            }
+
+            using var codec = SKCodec.Create(new MemoryStream(imageBytes));
+            if (codec == null) return;
+
+            double imgWidthPx = codec.Info.Width;
+            double imgHeightPx = codec.Info.Height;
+
+            // Convert pixels to points (assuming 96 DPI, so 1 px = 0.75 points)
+            double imgWidthPoints = imgWidthPx * 0.75;
+            double imgHeightPoints = imgHeightPx * 0.75;
+
+            double scale = Math.Min(targetWidthPoints / imgWidthPoints, targetHeightPoints / imgHeightPoints);
+            double finalWidthPoints = imgWidthPoints * scale;
+            double finalHeightPoints = imgHeightPoints * scale;
+
+            double marginLeftPoints = (targetWidthPoints - finalWidthPoints) / 2;
+            double marginTopPoints = (targetHeightPoints - finalHeightPoints) / 2;
+
+            SetAnchorOffsets(sheet, anchor, fromRef.Col, fromRef.Row, toRef.Col, toRef.Row, marginLeftPoints, marginTopPoints, finalWidthPoints, finalHeightPoints);
+        }
+
+        private void SetAnchorOffsets(ISheet sheet, IClientAnchor anchor, int startCol, int startRow, int lastCol, int lastRow, double marginLeft, double marginTop, double width, double height)
+        {
+            int col1 = startCol;
+            double dx1Points = marginLeft;
+
+            while (col1 <= lastCol)
+            {
+                double colWidthPoints = sheet.GetColumnWidth(col1) / 256.0 * 7.2;
+                if (dx1Points < colWidthPoints) break;
+                dx1Points -= colWidthPoints;
+                col1++;
+            }
+
+            int col2 = col1;
+            double dx2Points = dx1Points + width;
+            while (true)
+            {
+                double colWidthPoints = sheet.GetColumnWidth(col2) / 256.0 * 7.2;
+                if (dx2Points < colWidthPoints) break;
+                dx2Points -= colWidthPoints;
+                col2++;
+            }
+
+            int row1 = startRow;
+            double dy1Points = marginTop;
+
+            while (row1 <= lastRow)
+            {
+                double rowHeightPoints = sheet.GetRow(row1)?.HeightInPoints ?? sheet.DefaultRowHeightInPoints;
+                if (dy1Points < rowHeightPoints) break;
+                dy1Points -= rowHeightPoints;
+                row1++;
+            }
+
+            int row2 = row1;
+            double dy2Points = dy1Points + height;
+            while (true)
+            {
+                double rowHeightPoints = sheet.GetRow(row2)?.HeightInPoints ?? sheet.DefaultRowHeightInPoints;
+                if (dy2Points < rowHeightPoints) break;
+                dy2Points -= rowHeightPoints;
+                row2++;
+            }
+
+            anchor.Col1 = col1;
+            anchor.Row1 = row1;
+            anchor.Col2 = col2;
+            anchor.Row2 = row2;
+
+            if (anchor is XSSFClientAnchor)
+            {
+                // XSSF uses EMUs: 1 point = 12700 EMUs
+                anchor.Dx1 = (int)(dx1Points * 12700);
+                anchor.Dy1 = (int)(dy1Points * 12700);
+                anchor.Dx2 = (int)(dx2Points * 12700);
+                anchor.Dy2 = (int)(dy2Points * 12700);
+            }
+            else
+            {
+                // HSSF uses traditional units
+                double c1w = sheet.GetColumnWidth(col1) / 256.0 * 7.2;
+                double c2w = sheet.GetColumnWidth(col2) / 256.0 * 7.2;
+                double r1h = sheet.GetRow(row1)?.HeightInPoints ?? sheet.DefaultRowHeightInPoints;
+                double r2h = sheet.GetRow(row2)?.HeightInPoints ?? sheet.DefaultRowHeightInPoints;
+
+                anchor.Dx1 = (int)(dx1Points / (c1w > 0 ? c1w : 1) * 1024);
+                anchor.Dy1 = (int)(dy1Points / (r1h > 0 ? r1h : 1) * 256);
+                anchor.Dx2 = (int)(dx2Points / (c2w > 0 ? c2w : 1) * 1024);
+                anchor.Dy2 = (int)(dy2Points / (r2h > 0 ? r2h : 1) * 256);
             }
         }
     }
