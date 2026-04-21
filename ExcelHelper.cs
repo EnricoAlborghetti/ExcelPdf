@@ -484,7 +484,8 @@ namespace ExcelPdf
             // check if sheet exists
             if (_workbook.GetSheetIndex(newSheetName) != -1)
             {
-                newSheetName = newSheetName + "_" + DateTime.Now.ToString("yyyyMMddHHmmss");
+                // Already cloned [?]
+                return;
             }
             var newSheet = _workbook.CreateSheet(newSheetName);
 
