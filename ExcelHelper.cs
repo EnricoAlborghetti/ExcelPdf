@@ -149,6 +149,40 @@ namespace ExcelPdf
             };
         }
 
+        /// <summary>
+        /// Sets a cell as a dropdown list (data validation) and assigns an initial value.
+        /// </summary>
+        /// <param name="sheetName">The name of the sheet.</param>
+        /// <param name="cellAddress">The cell address (e.g., "A1").</param>
+        /// <param name="value">The initial value to set.</param>
+        /// <param name="possibleValues">The list of possible values for the dropdown.</param>
+        public void SetCellDropdown(string sheetName, string cellAddress, string? value, string[] possibleValues)
+        {
+            if (string.IsNullOrWhiteSpace(sheetName))
+                throw new ArgumentException("Sheet name cannot be empty.", nameof(sheetName));
+            if (possibleValues == null || possibleValues.Length == 0)
+                throw new ArgumentException("Possible values cannot be null or empty.", nameof(possibleValues));
+            if (value != null && !possibleValues.Contains(value))
+                throw new ArgumentException("Initial value must be one of the possible values.", nameof(value));
+
+            var sheet = GetSheet(sheetName);
+            var cellRef = new CellReference(cellAddress);
+            var row = sheet.GetRow(cellRef.Row) ?? sheet.CreateRow(cellRef.Row);
+            var cell = row.GetCell(cellRef.Col) ?? row.CreateCell(cellRef.Col);
+
+            // Set the initial value
+            cell.SetCellValue(value);
+
+            // Add data validation (dropdown)
+            var validationHelper = sheet.GetDataValidationHelper();
+            var addressList = new CellRangeAddressList(cellRef.Row, cellRef.Row, cellRef.Col, cellRef.Col);
+            var constraint = validationHelper.CreateExplicitListConstraint(possibleValues);
+            var dataValidation = validationHelper.CreateValidation(constraint, addressList);
+            
+            dataValidation.ShowErrorBox = true;
+            sheet.AddValidationData(dataValidation);
+        }
+
         private Dictionary<string, int> _pictureCache = new Dictionary<string, int>();
 
         /// <summary>
@@ -410,14 +444,15 @@ namespace ExcelPdf
         /// <param name="sheetName">The name of the sheet.</param>
         /// <param name="cellAddress">The cell address (e.g., "B2").</param>
         /// <param name="url">The URL to link to.</param>
-        public void SetCellHyperlink(string sheetName, string cellAddress, string url)
+        /// <param name="linkType">The hyperlink type. Defaults to Url (web links). Use File for local file paths.</param>
+        public void SetCellHyperlink(string sheetName, string cellAddress, string url, HyperlinkType linkType = HyperlinkType.Url)
         {
             var sheet = GetSheet(sheetName);
             var cellRef = new CellReference(cellAddress);
             var row = sheet.GetRow(cellRef.Row) ?? sheet.CreateRow(cellRef.Row);
             var cell = row.GetCell(cellRef.Col) ?? row.CreateCell(cellRef.Col);
 
-            var hyperlink = _workbook.GetCreationHelper().CreateHyperlink(HyperlinkType.Url);
+            var hyperlink = _workbook.GetCreationHelper().CreateHyperlink(linkType);
             hyperlink.Address = url;
             cell.Hyperlink = hyperlink;
         }
@@ -778,16 +813,16 @@ namespace ExcelPdf
             // If not, we might want to overwrite the original, but we have it open.
             // NPOI usually requires writing to a new stream.
 
-            string targetPath = outputPath ?? _filePath;
+            var targetPath = outputPath ?? _filePath;
 
             // If saving to the same file, we need to close the read stream first?
             // Or write to a temp file and replace.
 
-            string absoluteFilePath = Path.GetFullPath(_filePath);
-            string absoluteSourceDir = Path.GetDirectoryName(absoluteFilePath) ?? string.Empty;
+            var absoluteFilePath = Path.GetFullPath(_filePath);
+            var absoluteSourceDir = Path.GetDirectoryName(absoluteFilePath) ?? string.Empty;
 
             // Resolve relative outputPath against the source file's directory
-            string resolvedOutputPath = outputPath;
+            var resolvedOutputPath = outputPath;
             if (outputPath != null && !Path.IsPathRooted(outputPath))
             {
                 resolvedOutputPath = Path.Combine(absoluteSourceDir, outputPath);
