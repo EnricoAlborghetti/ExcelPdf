@@ -549,7 +549,14 @@ namespace ExcelPdf
 
             try
             {
-                newSheet.TabColorIndex = sourceSheet.TabColorIndex;
+                if (sourceSheet is XSSFSheet xssfSource && newSheet is XSSFSheet xssfDest)
+                {
+                    xssfDest.TabColor = xssfSource.TabColor;
+                }
+                else
+                {
+                    newSheet.TabColorIndex = sourceSheet.TabColorIndex;
+                }
             }
             catch { }
 
