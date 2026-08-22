@@ -495,6 +495,23 @@ namespace ExcelPdf
         }
 
         /// <summary>
+        /// Renames an existing sheet.
+        /// </summary>
+        /// <param name="oldSheetName">The current name of the sheet.</param>
+        /// <param name="newSheetName">The new name for the sheet.</param>
+        /// <exception cref="ArgumentException">Thrown if the sheet is not found.</exception>
+        public void RenameSheet(string oldSheetName, string newSheetName)
+        {
+            newSheetName = newSheetName.Length > 31 ? newSheetName.Substring(31) : newSheetName;
+            int sheetIndex = _workbook.GetSheetIndex(oldSheetName);
+            if (sheetIndex == -1)
+            {
+                throw new ArgumentException($"Sheet '{oldSheetName}' not found.");
+            }
+            _workbook.SetSheetName(sheetIndex, newSheetName);
+        }
+
+        /// <summary>
         /// Duplicates an existing sheet.
         /// </summary>
         /// <param name="sourceSheetName">The name of the sheet to clone.</param>
