@@ -3,6 +3,8 @@ using NPOI.SS.UserModel;
 using NPOI.XSSF.UserModel;
 using NPOI.HSSF.UserModel;
 using NPOI.SS.Util;
+using SkiaSharp;
+using NPOI.Util;
 using System;
 using System.IO;
 using System.Collections.Generic;
@@ -19,6 +21,7 @@ namespace ExcelPdf
         private IWorkbook _workbook;
         private string _filePath;
         private FileStream _fileStream;
+        private Dictionary<string, Dictionary<(int, int), CellRangeAddress>> _mergedRegionCache = new();
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ExcelHelper"/> class.
@@ -104,19 +107,12 @@ namespace ExcelPdf
                 setFont = true;
                 if (font is XSSFFont xssfFont)
                 {
-                    try
+                    byte[]? rgb = TryParseHexColor(colorHex);
+                    if (rgb != null && rgb.Length == 3)
                     {
-                        byte[] rgb = Enumerable.Range(0, colorHex.Length)
-                             .Where(x => x % 2 == 0)
-                             .Select(x => Convert.ToByte(colorHex.Substring(x, 2), 16))
-                             .ToArray();
-                        if (rgb.Length == 3)
-                        {
-                            var color = new XSSFColor(rgb);
-                            xssfFont.SetColor(color);
-                        }
+                        var color = new XSSFColor(rgb);
+                        xssfFont.SetColor(color);
                     }
-                    catch { /* Ignore invalid hex */ }
                 }
             }
 
@@ -151,6 +147,40 @@ namespace ExcelPdf
                 CellType.Blank => string.Empty,
                 _ => cell.ToString() ?? string.Empty
             };
+        }
+
+        /// <summary>
+        /// Sets a cell as a dropdown list (data validation) and assigns an initial value.
+        /// </summary>
+        /// <param name="sheetName">The name of the sheet.</param>
+        /// <param name="cellAddress">The cell address (e.g., "A1").</param>
+        /// <param name="value">The initial value to set.</param>
+        /// <param name="possibleValues">The list of possible values for the dropdown.</param>
+        public void SetCellDropdown(string sheetName, string cellAddress, string? value, string[] possibleValues)
+        {
+            if (string.IsNullOrWhiteSpace(sheetName))
+                throw new ArgumentException("Sheet name cannot be empty.", nameof(sheetName));
+            if (possibleValues == null || possibleValues.Length == 0)
+                throw new ArgumentException("Possible values cannot be null or empty.", nameof(possibleValues));
+            if (value != null && !possibleValues.Contains(value))
+                throw new ArgumentException("Initial value must be one of the possible values.", nameof(value));
+
+            var sheet = GetSheet(sheetName);
+            var cellRef = new CellReference(cellAddress);
+            var row = sheet.GetRow(cellRef.Row) ?? sheet.CreateRow(cellRef.Row);
+            var cell = row.GetCell(cellRef.Col) ?? row.CreateCell(cellRef.Col);
+
+            // Set the initial value
+            cell.SetCellValue(value);
+
+            // Add data validation (dropdown)
+            var validationHelper = sheet.GetDataValidationHelper();
+            var addressList = new CellRangeAddressList(cellRef.Row, cellRef.Row, cellRef.Col, cellRef.Col);
+            var constraint = validationHelper.CreateExplicitListConstraint(possibleValues);
+            var dataValidation = validationHelper.CreateValidation(constraint, addressList);
+            
+            dataValidation.ShowErrorBox = true;
+            sheet.AddValidationData(dataValidation);
         }
 
         private Dictionary<string, int> _pictureCache = new Dictionary<string, int>();
@@ -257,7 +287,8 @@ namespace ExcelPdf
         /// <param name="fromAddress">The top-left cell address (e.g., "A1").</param>
         /// <param name="toAddress">The bottom-right cell address (e.g., "E38").</param>
         /// <param name="imageBytes">The image bytes.</param>
-        public void SetCellImage(string sheetName, string fromAddress, string toAddress, byte[]? imageBytes)
+        /// <param name="adaptiveCenter">If true, fits the image in the range maintaining aspect ratio and centering it.</param>
+        public void SetCellImage(string sheetName, string fromAddress, string toAddress, byte[]? imageBytes, bool adaptiveCenter = false)
         {
             if (imageBytes == null || imageBytes.Length == 0) return;
 
@@ -275,10 +306,24 @@ namespace ExcelPdf
             var helper = _workbook.GetCreationHelper();
             var anchor = helper.CreateClientAnchor();
 
-            anchor.Col1 = fromRef.Col;
-            anchor.Row1 = fromRef.Row;
-            anchor.Col2 = toRef.Col + 1;
-            anchor.Row2 = toRef.Row + 1;
+            if (adaptiveCenter)
+            {
+                if (!ApplyAdaptiveCenterAnchor(sheet, fromRef, toRef, imageBytes, anchor))
+                {
+                    // Fallback to non-adaptive if centering fails
+                    anchor.Col1 = fromRef.Col;
+                    anchor.Row1 = fromRef.Row;
+                    anchor.Col2 = toRef.Col + 1;
+                    anchor.Row2 = toRef.Row + 1;
+                }
+            }
+            else
+            {
+                anchor.Col1 = fromRef.Col;
+                anchor.Row1 = fromRef.Row;
+                anchor.Col2 = toRef.Col + 1;
+                anchor.Row2 = toRef.Row + 1;
+            }
 
             // For XSSF (xlsx), we need to set AnchorType to MoveAndResize to behave like a cell content
             if (anchor is XSSFClientAnchor xssfAnchor)
@@ -292,10 +337,10 @@ namespace ExcelPdf
         /// <summary>
         /// Inserts or replaces an image in a specific cell range.
         /// </summary>
-        public void SetCellImage(string sheetName, string fromAddress, string toAddress, string imagePath)
+        public void SetCellImage(string sheetName, string fromAddress, string toAddress, string imagePath, bool adaptiveCenter = false)
         {
             if (!File.Exists(imagePath)) throw new FileNotFoundException($"Image file not found: {imagePath}");
-            SetCellImage(sheetName, fromAddress, toAddress, File.ReadAllBytes(imagePath));
+            SetCellImage(sheetName, fromAddress, toAddress, File.ReadAllBytes(imagePath), adaptiveCenter);
         }
 
         private int AddImageToWorkbook(byte[] imageBytes)
@@ -368,19 +413,12 @@ namespace ExcelPdf
                 // Let's assume XSSF (xlsx) primarily as per project usage.
                 if (font is XSSFFont xssfFont)
                 {
-                    try
+                    byte[]? rgb = TryParseHexColor(colorHex);
+                    if (rgb != null && rgb.Length == 3)
                     {
-                        byte[] rgb = Enumerable.Range(0, colorHex.Length)
-                             .Where(x => x % 2 == 0)
-                             .Select(x => Convert.ToByte(colorHex.Substring(x, 2), 16))
-                             .ToArray();
-                        if (rgb.Length == 3)
-                        {
-                            var color = new XSSFColor(rgb);
-                            xssfFont.SetColor(color);
-                        }
+                        var color = new XSSFColor(rgb);
+                        xssfFont.SetColor(color);
                     }
-                    catch { /* Ignore invalid hex */ }
                 }
             }
 
@@ -406,14 +444,15 @@ namespace ExcelPdf
         /// <param name="sheetName">The name of the sheet.</param>
         /// <param name="cellAddress">The cell address (e.g., "B2").</param>
         /// <param name="url">The URL to link to.</param>
-        public void SetCellHyperlink(string sheetName, string cellAddress, string url)
+        /// <param name="linkType">The hyperlink type. Defaults to Url (web links). Use File for local file paths.</param>
+        public void SetCellHyperlink(string sheetName, string cellAddress, string url, HyperlinkType linkType = HyperlinkType.Url)
         {
             var sheet = GetSheet(sheetName);
             var cellRef = new CellReference(cellAddress);
             var row = sheet.GetRow(cellRef.Row) ?? sheet.CreateRow(cellRef.Row);
             var cell = row.GetCell(cellRef.Col) ?? row.CreateCell(cellRef.Col);
 
-            var hyperlink = _workbook.GetCreationHelper().CreateHyperlink(HyperlinkType.Url);
+            var hyperlink = _workbook.GetCreationHelper().CreateHyperlink(linkType);
             hyperlink.Address = url;
             cell.Hyperlink = hyperlink;
         }
@@ -456,6 +495,23 @@ namespace ExcelPdf
         }
 
         /// <summary>
+        /// Renames an existing sheet.
+        /// </summary>
+        /// <param name="oldSheetName">The current name of the sheet.</param>
+        /// <param name="newSheetName">The new name for the sheet.</param>
+        /// <exception cref="ArgumentException">Thrown if the sheet is not found.</exception>
+        public void RenameSheet(string oldSheetName, string newSheetName)
+        {
+            newSheetName = newSheetName.Length > 31 ? newSheetName.Substring(31) : newSheetName;
+            int sheetIndex = _workbook.GetSheetIndex(oldSheetName);
+            if (sheetIndex == -1)
+            {
+                throw new ArgumentException($"Sheet '{oldSheetName}' not found.");
+            }
+            _workbook.SetSheetName(sheetIndex, newSheetName);
+        }
+
+        /// <summary>
         /// Duplicates an existing sheet.
         /// </summary>
         /// <param name="sourceSheetName">The name of the sheet to clone.</param>
@@ -477,6 +533,12 @@ namespace ExcelPdf
         private void ManualCopySheet(string sourceSheetName, string newSheetName)
         {
             var sourceSheet = GetSheet(sourceSheetName);
+            // check if sheet exists
+            if (_workbook.GetSheetIndex(newSheetName) != -1)
+            {
+                // Already cloned [?]
+                return;
+            }
             var newSheet = _workbook.CreateSheet(newSheetName);
 
             // 1. Copy Rows and Cells (Content) - Prioritize this to ensure data is present even if styles fail
@@ -618,6 +680,8 @@ namespace ExcelPdf
                 newSheet.Footer.Right = sourceSheet.Footer.Right;
             }
             catch { }
+
+            ClearCache(newSheetName);
         }
 
         /// <summary>
@@ -680,18 +744,25 @@ namespace ExcelPdf
                         destSheet.AddMergedRegion(newRegion);
                     }
                 }
+                ClearCache(destSheet.SheetName);
             }
         }
 
         private void RemoveMergedRegionsInRow(ISheet sheet, int rowIndex)
         {
+            bool removed = false;
             for (int i = sheet.NumMergedRegions - 1; i >= 0; i--)
             {
                 var region = sheet.GetMergedRegion(i);
                 if (region.FirstRow == rowIndex && region.LastRow == rowIndex)
                 {
                     sheet.RemoveMergedRegion(i);
+                    removed = true;
                 }
+            }
+            if (removed)
+            {
+                ClearCache(sheet.SheetName);
             }
         }
 
@@ -759,16 +830,16 @@ namespace ExcelPdf
             // If not, we might want to overwrite the original, but we have it open.
             // NPOI usually requires writing to a new stream.
 
-            string targetPath = outputPath ?? _filePath;
+            var targetPath = outputPath ?? _filePath;
 
             // If saving to the same file, we need to close the read stream first?
             // Or write to a temp file and replace.
 
-            string absoluteFilePath = Path.GetFullPath(_filePath);
-            string absoluteSourceDir = Path.GetDirectoryName(absoluteFilePath) ?? string.Empty;
+            var absoluteFilePath = Path.GetFullPath(_filePath);
+            var absoluteSourceDir = Path.GetDirectoryName(absoluteFilePath) ?? string.Empty;
 
             // Resolve relative outputPath against the source file's directory
-            string resolvedOutputPath = outputPath;
+            var resolvedOutputPath = outputPath;
             if (outputPath != null && !Path.IsPathRooted(outputPath))
             {
                 resolvedOutputPath = Path.Combine(absoluteSourceDir, outputPath);
@@ -851,6 +922,22 @@ namespace ExcelPdf
             return sheet;
         }
 
+        private byte[]? TryParseHexColor(string? colorHex)
+        {
+            if (string.IsNullOrEmpty(colorHex)) return null;
+            try
+            {
+                return Enumerable.Range(0, colorHex.Length)
+                     .Where(x => x % 2 == 0)
+                     .Select(x => Convert.ToByte(colorHex.Substring(x, 2), 16))
+                     .ToArray();
+            }
+            catch
+            {
+                return null;
+            }
+        }
+
         private void RemoveImageAt(ISheet sheet, int row, int col)
         {
             var drawing = sheet.CreateDrawingPatriarch();
@@ -930,15 +1017,36 @@ namespace ExcelPdf
 
         private CellRangeAddress? GetMergedRegion(ISheet sheet, int row, int col)
         {
-            for (int i = 0; i < sheet.NumMergedRegions; i++)
+            if (!_mergedRegionCache.TryGetValue(sheet.SheetName, out var sheetCache))
             {
-                var region = sheet.GetMergedRegion(i);
-                if (region.IsInRange(row, col))
+                sheetCache = new Dictionary<(int, int), CellRangeAddress>();
+                for (int i = 0; i < sheet.NumMergedRegions; i++)
                 {
-                    return region;
+                    var region = sheet.GetMergedRegion(i);
+                    for (int r = region.FirstRow; r <= region.LastRow; r++)
+                    {
+                        for (int c = region.FirstColumn; c <= region.LastColumn; c++)
+                        {
+                            sheetCache[(r, c)] = region;
+                        }
+                    }
                 }
+                _mergedRegionCache[sheet.SheetName] = sheetCache;
             }
-            return null;
+
+            return sheetCache.TryGetValue((row, col), out var range) ? range : null;
+        }
+
+        private void ClearCache(string? sheetName = null)
+        {
+            if (sheetName == null)
+            {
+                _mergedRegionCache.Clear();
+            }
+            else
+            {
+                _mergedRegionCache.Remove(sheetName);
+            }
         }
 
         /// <summary>
@@ -959,6 +1067,7 @@ namespace ExcelPdf
                 {
                     sheet.ShiftRows(rowIndex + 1, lastRowIndex, -1);
                 }
+                ClearCache(sheetName);
             }
         }
 
@@ -972,6 +1081,123 @@ namespace ExcelPdf
             if (sheetIndex != -1)
             {
                 _workbook.RemoveSheetAt(sheetIndex);
+                ClearCache(sheetName);
+            }
+        }
+
+        private bool ApplyAdaptiveCenterAnchor(ISheet sheet, CellReference fromRef, CellReference toRef, byte[] imageBytes, IClientAnchor anchor)
+        {
+            double targetWidthPoints = 0;
+            for (int col = fromRef.Col; col <= toRef.Col; col++)
+            {
+                // NPOI returns column width in 1/256th of a character width.
+                // An approximation for points: width / 256.0 * 7.2
+                targetWidthPoints += sheet.GetColumnWidth(col) / 256.0 * 7.2;
+            }
+
+            double targetHeightPoints = 0;
+            for (int row = fromRef.Row; row <= toRef.Row; row++)
+            {
+                var r = sheet.GetRow(row);
+                targetHeightPoints += r?.HeightInPoints ?? sheet.DefaultRowHeightInPoints;
+            }
+
+            using var codec = SKCodec.Create(new MemoryStream(imageBytes));
+            if (codec == null) return false;
+
+            double imgWidthPx = codec.Info.Width;
+            double imgHeightPx = codec.Info.Height;
+
+            // Convert pixels to points (assuming 96 DPI, so 1 px = 0.75 points)
+            double imgWidthPoints = imgWidthPx * 0.75;
+            double imgHeightPoints = imgHeightPx * 0.75;
+
+            if (imgWidthPoints <= 0 || imgHeightPoints <= 0) return false;
+
+            double scale = Math.Min(targetWidthPoints / imgWidthPoints, targetHeightPoints / imgHeightPoints);
+            double finalWidthPoints = imgWidthPoints * scale;
+            double finalHeightPoints = imgHeightPoints * scale;
+
+            double marginLeftPoints = (targetWidthPoints - finalWidthPoints) / 2;
+            double marginTopPoints = (targetHeightPoints - finalHeightPoints) / 2;
+
+            SetAnchorOffsets(sheet, anchor, fromRef.Col, fromRef.Row, toRef.Col, toRef.Row, marginLeftPoints, marginTopPoints, finalWidthPoints, finalHeightPoints);
+            return true;
+        }
+
+        private void SetAnchorOffsets(ISheet sheet, IClientAnchor anchor, int startCol, int startRow, int lastCol, int lastRow, double marginLeft, double marginTop, double width, double height)
+        {
+            int col1 = startCol;
+            double dx1Points = marginLeft;
+
+            while (col1 <= lastCol)
+            {
+                double colWidthPoints = sheet.GetColumnWidth(col1) / 256.0 * 7.2;
+                if (dx1Points < colWidthPoints) break;
+                dx1Points -= colWidthPoints;
+                col1++;
+            }
+
+            int col2 = col1;
+            double dx2Points = dx1Points + width;
+            int maxCol = _workbook.SpreadsheetVersion.LastColumnIndex;
+            while (true)
+            {
+                if (col2 > maxCol) throw new ArgumentException("The requested image width exceeds the maximum allowed column index.");
+                double colWidthPoints = sheet.GetColumnWidth(col2) / 256.0 * 7.2;
+                if (dx2Points < colWidthPoints) break;
+                dx2Points -= colWidthPoints;
+                col2++;
+            }
+
+            int row1 = startRow;
+            double dy1Points = marginTop;
+
+            while (row1 <= lastRow)
+            {
+                double rowHeightPoints = sheet.GetRow(row1)?.HeightInPoints ?? sheet.DefaultRowHeightInPoints;
+                if (dy1Points < rowHeightPoints) break;
+                dy1Points -= rowHeightPoints;
+                row1++;
+            }
+
+            int row2 = row1;
+            double dy2Points = dy1Points + height;
+            int maxRow = _workbook.SpreadsheetVersion.LastRowIndex;
+            while (true)
+            {
+                if (row2 > maxRow) throw new ArgumentException("The requested image height exceeds the maximum allowed row index.");
+                double rowHeightPoints = sheet.GetRow(row2)?.HeightInPoints ?? sheet.DefaultRowHeightInPoints;
+                if (dy2Points < rowHeightPoints) break;
+                dy2Points -= rowHeightPoints;
+                row2++;
+            }
+
+            anchor.Col1 = col1;
+            anchor.Row1 = row1;
+            anchor.Col2 = col2;
+            anchor.Row2 = row2;
+
+            if (anchor is XSSFClientAnchor)
+            {
+                // XSSF uses EMUs: 1 point = 12700 EMUs
+                anchor.Dx1 = (int)(dx1Points * 12700);
+                anchor.Dy1 = (int)(dy1Points * 12700);
+                anchor.Dx2 = (int)(dx2Points * 12700);
+                anchor.Dy2 = (int)(dy2Points * 12700);
+            }
+            else
+            {
+                // HSSF uses traditional units
+                double c1w = sheet.GetColumnWidth(col1) / 256.0 * 7.2;
+                double c2w = sheet.GetColumnWidth(col2) / 256.0 * 7.2;
+                double r1h = sheet.GetRow(row1)?.HeightInPoints ?? sheet.DefaultRowHeightInPoints;
+                double r2h = sheet.GetRow(row2)?.HeightInPoints ?? sheet.DefaultRowHeightInPoints;
+
+                anchor.Dx1 = (int)(dx1Points / (c1w > 0 ? c1w : 1) * 1024);
+                anchor.Dy1 = (int)(dy1Points / (r1h > 0 ? r1h : 1) * 256);
+                anchor.Dx2 = (int)(dx2Points / (c2w > 0 ? c2w : 1) * 1024);
+                anchor.Dy2 = (int)(dy2Points / (r2h > 0 ? r2h : 1) * 256);
             }
         }
     }
