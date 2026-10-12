@@ -502,7 +502,7 @@ namespace ExcelPdf
         /// <exception cref="ArgumentException">Thrown if the sheet is not found.</exception>
         public void RenameSheet(string oldSheetName, string newSheetName)
         {
-            newSheetName = newSheetName.Length > 31 ? newSheetName.Substring(31) : newSheetName;
+            newSheetName = newSheetName.Length > 31 ? newSheetName.Substring(0, 31) : newSheetName;
             int sheetIndex = _workbook.GetSheetIndex(oldSheetName);
             if (sheetIndex == -1)
             {
@@ -519,7 +519,7 @@ namespace ExcelPdf
         /// <exception cref="ArgumentException">Thrown if the source sheet is not found.</exception>
         public void DuplicateSheet(string sourceSheetName, string newSheetName)
         {
-            newSheetName = newSheetName.Length > 31 ? newSheetName.Substring(31) : newSheetName;
+            newSheetName = newSheetName.Length > 31 ? newSheetName.Substring(0, 31) : newSheetName;
             int sheetIndex = _workbook.GetSheetIndex(sourceSheetName);
             if (sheetIndex == -1)
             {
@@ -913,7 +913,7 @@ namespace ExcelPdf
 
         private ISheet GetSheet(string sheetName)
         {
-            sheetName = sheetName.Length > 31 ? sheetName.Substring(31) : sheetName;
+            sheetName = sheetName.Length > 31 ? sheetName.Substring(0, 31) : sheetName;
             var sheet = _workbook.GetSheet(sheetName);
             if (sheet == null)
             {
